@@ -1,0 +1,195 @@
+.TH RDMAPIPE 1 "August 2026" "rdmapipe 0.1.0" "User Commands"
+.SH NAME
+rdmapipe \- connect Unix byte streams across an RDMA fabric
+.SH SYNOPSIS
+.B rdmapipe
+[OPTIONS] \fB--send\fR
+.br
+.B rdmapipe
+[OPTIONS] \fB--recv\fR
+.br
+.B rdmapipe
+[OPTIONS] HOST \fB--\fR COMMAND [ARG ...]
+.SH DESCRIPTION
+.B rdmapipe
+transports local standard input to a remote standard output or command
+standard input over one or two libibverbs reliable-connected channels.
+SSH authenticates and launches the remote process; RDMA carries the
+unencrypted, unchecksummed bulk byte stream.
+.PP
+The raw form is:
+.PP
+.nf
+producer | rdmapipe --send |
+  ssh host 'rdmapipe --recv | consumer'
+.fi
+.PP
+The sender writes one newline-terminated JSON rendezvous descriptor to
+standard output and keeps that descriptor pipe open while transferring.  The
+receiver reads exactly one line and connects immediately.  Bulk bytes never
+traverse the descriptor pipe.
+.PP
+The shorthand form is:
+.PP
+.nf
+producer | rdmapipe host -- consumer args
+.fi
+.PP
+The literal
+.B --
+is required, all rdmapipe options precede HOST, and everything following it is
+the remote argv.
+.PP
+It supervises the equivalent sender and SSH receiver.  Command arguments are
+transmitted as a base64-encoded, NUL-separated argv vector and passed to
+.BR execvp (3),
+not concatenated into shell text.  Invoke
+.B sh -c
+explicitly when shell syntax is wanted.
+.SH MODES
+.TP
+.B --send
+Run the descriptor-producing, standard-input-consuming sender.
+.TP
+.B --recv
+Read one descriptor and write the received stream.  This mode also supports
+the internal safe-argv execution used by shorthand.
+.SH TRANSPORT OPTIONS
+.TP
+.BR --channels= auto|1|2
+Select the RC channel count.  Auto is the default and requires only one usable
+path.  Two is selected when both peers expose useful paths or one 400-Gb/s
+device faces two 200-Gb/s devices.
+.TP
+.BR --rails= auto|1|2
+Alias for
+.BR --channels .
+.TP
+.BI --chunk-size= SIZE
+Set registered payload bytes per slot.  The default is 2M.  Values from 4K to
+8M, aligned to 64 bytes, are accepted; K, M, and G are binary suffixes.
+.TP
+.BI --queue-depth= N
+Set slots per channel.  The default is 4 and the accepted range is 2 through
+4096.  Default payload memory is approximately 8 MiB per channel.
+.TP
+.BI --device= LIST
+Restrict local discovery to comma-separated verbs device names, network device
+names, or RoCE IPv4 addresses.
+.TP
+.BI --remote-device= LIST
+Apply a receiver discovery filter in shorthand mode.
+.TP
+.BI --port= PORT
+Set the sender's first TCP bootstrap port.  Zero, the default, requests
+ephemeral ports.  Fixed ports advance for additional advertised endpoints.
+.TP
+.BI --timeout= SECONDS
+Set the overall descriptor/setup and no-progress timeout.  The default is 300;
+the accepted range is 1 through 86400.
+.TP
+.B --discard
+Receive and validate the complete framed stream without writing its payload.
+This is a receiver benchmark mode.
+.TP
+.B --remote-discard
+Enable receiver discard mode from shorthand.
+.SH SSH OPTIONS
+.TP
+.BI --remote-path= PROGRAM
+Set the remote rdmapipe executable.  The default is
+.BR rdmapipe .
+For a per-user install, quote the local argument as
+.BR "--remote-path='~/.local/bin/rdmapipe'"
+so the remote login shell expands the tilde.
+.TP
+.BI --ssh= PROGRAM
+Set the SSH executable.  The default is
+.BR ssh .
+.TP
+.BI --ssh-option= ARG
+Append one local SSH argument before HOST.  Repeat as necessary.
+.SH DIAGNOSTICS
+.TP
+.BR -q , " --quiet"
+Suppress topology and final statistics.  Errors are not suppressed.
+.TP
+.BR -v , " --verbose"
+Add endpoint and lifecycle detail on standard error.  Repeat for more detail.
+.TP
+.BR -h , " --help"
+Print concise command help.
+.TP
+.B --version
+Print program/protocol versions and compiled defaults.
+.SH STREAM SEMANTICS
+The sender reads directly into fixed registered slots.  The receiver writes
+directly from completed registered slots and reposts a slot only after its
+payload is consumed.  This provides bounded backpressure.
+.PP
+On Linux, the sender best-effort grows an input pipe, temporarily enables
+nonblocking reads, drains immediately available input before polling again,
+and restores the original file status flags after the transfer.
+.PP
+EOF is an explicit FIN frame.  Disconnect before FIN, invalid ordering, write
+failure, early consumer exit, timeout, authentication failure, and QP failure
+are errors.  Version 1 is unidirectional; remote stdout and stderr return over
+SSH in shorthand mode.
+.PP
+Shorthand consumers run in a separate process group.  Transfer failure or
+cancellation signals the complete command tree; a command that ignores
+SIGTERM is killed after a two-second cleanup grace period.
+.SH EXIT STATUS
+.TP
+.B 0
+Stream and remote command completed successfully.
+.TP
+.B 2
+Command-line or descriptor syntax error.
+.TP
+.B 69
+No usable RDMA endpoint or connection is available.
+.TP
+.B 70
+Protocol, authentication, ordering, or explicit-FIN error.
+.TP
+.B 74
+Standard I/O, verbs, or control-channel error.
+.TP
+.B 75
+Setup or progress timeout.
+.TP
+.B 126, 127
+Remote command could not be executed or found.
+.TP
+.B 128+N
+Terminated by signal N.
+.SH ENVIRONMENT
+.TP
+.B RDMAPIPE_SSH
+Default shorthand SSH executable.
+.TP
+.B RDMAPIPE_REMOTE_PATH
+Default remote rdmapipe executable.
+.SH EXAMPLES
+.nf
+docker image save --platform linux/arm64 app:latest |
+  rdmapipe ostrich -- sudo docker image load
+
+tar -C /models -cf - glmrt |
+  rdmapipe kiwi -- tar -xf - -C /srv/models
+
+set -o pipefail
+producer | rdmapipe --send |
+  ssh dodo 'set -o pipefail; rdmapipe --recv | consumer'
+.fi
+.SH SECURITY
+The descriptor contains a random one-shot token used to authenticate bootstrap
+connections.  Neither RDMA payload nor TCP control is encrypted or
+cryptographically checksummed.  Use rdmapipe only on an appropriately trusted
+fabric or compose application security explicitly.
+.SH SEE ALSO
+.BR ssh (1),
+.BR pipe (7),
+.BR ibv_post_send (3),
+.BR ibv_post_recv (3)

@@ -1,0 +1,6 @@
+*.o
+/rdmapipe
+/tests/protocol-test
+/tests/testtmp/
+/benchmarks/raw/*.tmp
+*~
