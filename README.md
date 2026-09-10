@@ -142,7 +142,7 @@ if brew commands | grep -qx trust; then brew trust --tap tpurtell/local-ai; fi
 brew install tpurtell/local-ai/rdmapipe
 ```
 
-Install on both endpoints. The tap builds natively and supplies libibverbs;
+Install on both endpoints. The tap supplies native ARM64/AMD64 bottles and libibverbs;
 the Linux kernel RDMA drivers and configured fabric must already be available.
 
 Requirements:
