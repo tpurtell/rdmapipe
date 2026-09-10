@@ -133,6 +133,18 @@ Linux producer-pipe tuning pass raised its alternating median from 57.55 to
 
 ## Build and install
 
+For Linux ARM64 (including DGX Spark) and AMD64, install the stable release
+through the [Local AI Homebrew tap](https://github.com/tpurtell/local-ai-tap#readme):
+
+```sh
+brew tap tpurtell/local-ai https://github.com/tpurtell/local-ai-tap.git
+if brew commands | grep -qx trust; then brew trust --tap tpurtell/local-ai; fi
+brew install tpurtell/local-ai/rdmapipe
+```
+
+Install on both endpoints. The tap builds natively and supplies libibverbs;
+the Linux kernel RDMA drivers and configured fabric must already be available.
+
 Requirements:
 
 - Linux with IPv4 RoCE v2;
